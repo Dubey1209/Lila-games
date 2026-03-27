@@ -5,105 +5,146 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-st.title("LILA Player Data Viewer")
-st.write("Upload your .nakama-0 file below")
+st.set_page_config(page_title="LILA Player Viewer", layout="wide")
+
+st.title("🎮 LILA Player Data Viewer")
+st.write("Upload your `.nakama-0` file below")
 
 uploaded_file = st.file_uploader("Upload file", type=None)
 
 if uploaded_file is not None:
     try:
+        # -------------------------
+        # LOAD DATA
+        # -------------------------
         table = pq.read_table(uploaded_file)
         df = table.to_pandas()
 
         st.success("File loaded successfully!")
 
-        # Decode event column
+        # Decode event column safely
         if 'event' in df.columns:
             df['event'] = df['event'].apply(
                 lambda x: x.decode('utf-8') if isinstance(x, bytes) else x
             )
 
+        # Filter position data once
         position_df = df[df['event'] == 'Position'].copy()
 
-        if not position_df.empty:
+        if position_df.empty:
+            st.warning("No position data found.")
+            st.stop()
 
-            st.subheader("📊 Position Stats")
-            st.write(position_df[['x', 'y']].describe())
+        # Ensure numeric
+        position_df['x'] = pd.to_numeric(position_df['x'], errors='coerce')
+        position_df['y'] = pd.to_numeric(position_df['y'], errors='coerce')
+        position_df = position_df.dropna(subset=['x', 'y'])
 
-            # Load map
-            img = mpimg.imread("AmbroseValley_Minimap.png")
+        st.subheader("📊 Position Stats")
+        st.dataframe(position_df[['x', 'y']].describe())
 
-            xmin, xmax = position_df['x'].min(), position_df['x'].max()
-            ymin, ymax = position_df['y'].min(), position_df['y'].max()
+        # -------------------------
+        # LOAD MAP IMAGE
+        # -------------------------
+        img = mpimg.imread("AmbroseValley_Minimap.png")
 
-            # -------------------------
-            # 🗺️ FULL PATH VIEW
-            # -------------------------
-            st.subheader("🗺️ Player Path")
+        xmin, xmax = position_df['x'].min(), position_df['x'].max()
+        ymin, ymax = position_df['y'].min(), position_df['y'].max()
 
-            fig, ax = plt.subplots()
+        # -------------------------
+        # 🗺️ FULL PATH VIEW
+        # -------------------------
+        st.subheader("🗺️ Player Path")
 
-            ax.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
+        fig, ax = plt.subplots()
 
-            ax.plot(position_df['x'], position_df['y'], color='blue', alpha=0.6)
+        ax.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
 
-            ax.scatter(position_df['x'], position_df['y'], s=5, c='red')
+        ax.plot(
+            position_df['x'],
+            position_df['y'],
+            color='blue',
+            linewidth=1,
+            alpha=0.7
+        )
 
-            st.pyplot(fig)
+        ax.scatter(
+            position_df['x'],
+            position_df['y'],
+            s=6,
+            c='red'
+        )
 
-            # -------------------------
-            # 🔥 HEATMAP
-            # -------------------------
-            st.subheader("🔥 Movement Heatmap")
+        ax.set_title("Player Movement Path")
+        st.pyplot(fig)
+        plt.close(fig)
 
-            heatmap, xedges, yedges = np.histogram2d(
-                position_df['x'],
-                position_df['y'],
-                bins=50
-            )
+        # -------------------------
+        # 🔥 HEATMAP (IMPROVED)
+        # -------------------------
+        st.subheader("🔥 Movement Heatmap")
 
-            fig2, ax2 = plt.subplots()
+        heatmap, xedges, yedges = np.histogram2d(
+            position_df['x'],
+            position_df['y'],
+            bins=60
+        )
 
-            ax2.imshow(
-                heatmap.T,
-                origin='lower',
-                cmap='hot',
-                alpha=0.6,
-                extent=[xmin, xmax, ymin, ymax]
-            )
+        fig2, ax2 = plt.subplots()
 
-            ax2.set_title("Player Heatmap (High Activity Zones)")
+        ax2.imshow(
+            heatmap.T,
+            origin='lower',
+            cmap='hot',
+            alpha=0.65,
+            extent=[xmin, xmax, ymin, ymax],
+            aspect='auto'
+        )
 
-            st.pyplot(fig2)
+        ax2.imshow(img, extent=[xmin, xmax, ymin, ymax], alpha=0.25, aspect='auto')
 
-            # -------------------------
-            # 🎮 REPLAY FEATURE (NEW)
-            # -------------------------
-            st.subheader("🎮 Movement Replay")
+        ax2.set_title("Player Heatmap (Activity Zones)")
 
-            step = st.slider(
-                "Replay Progress",
-                1,
-                len(position_df),
-                len(position_df) // 2
-            )
+        st.pyplot(fig2)
+        plt.close(fig2)
 
-            temp_df = position_df.iloc[:step]
+        # -------------------------
+        # 🎮 REPLAY FEATURE (SMOOTHER)
+        # -------------------------
+        st.subheader("🎮 Movement Replay")
 
-            fig3, ax3 = plt.subplots()
+        step = st.slider(
+            "Replay Progress",
+            min_value=1,
+            max_value=len(position_df),
+            value=min(len(position_df), 100)
+        )
 
-            ax3.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
+        temp_df = position_df.iloc[:step]
 
-            ax3.plot(temp_df['x'], temp_df['y'], color='blue', alpha=0.6)
+        fig3, ax3 = plt.subplots()
 
-            ax3.scatter(temp_df['x'], temp_df['y'], c='red', s=5)
+        ax3.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
 
-            ax3.set_title("Live Movement Replay")
+        ax3.plot(
+            temp_df['x'],
+            temp_df['y'],
+            color='blue',
+            linewidth=1,
+            alpha=0.8
+        )
 
-            st.pyplot(fig3)
+        ax3.scatter(
+            temp_df['x'],
+            temp_df['y'],
+            c='red',
+            s=6
+        )
 
-        else:
-            st.write("No position data found.")
+        ax3.set_title(f"Replay Frame: {step}")
+
+        st.pyplot(fig3)
+        plt.close(fig3)
 
     except Exception as e:
         st.error(f"Error: {e}")
