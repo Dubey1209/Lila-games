@@ -17,6 +17,7 @@ if uploaded_file is not None:
 
         st.success("File loaded successfully!")
 
+        # Decode event column
         if 'event' in df.columns:
             df['event'] = df['event'].apply(
                 lambda x: x.decode('utf-8') if isinstance(x, bytes) else x
@@ -35,22 +36,24 @@ if uploaded_file is not None:
             xmin, xmax = position_df['x'].min(), position_df['x'].max()
             ymin, ymax = position_df['y'].min(), position_df['y'].max()
 
+            # -------------------------
+            # 🗺️ FULL PATH VIEW
+            # -------------------------
+            st.subheader("🗺️ Player Path")
+
             fig, ax = plt.subplots()
 
             ax.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
 
-            # 🔥 PATH
             ax.plot(position_df['x'], position_df['y'], color='blue', alpha=0.6)
 
-            # 🔴 POINTS
             ax.scatter(position_df['x'], position_df['y'], s=5, c='red')
 
             st.pyplot(fig)
 
             # -------------------------
-            # 🔥 HEATMAP SECTION
+            # 🔥 HEATMAP
             # -------------------------
-
             st.subheader("🔥 Movement Heatmap")
 
             heatmap, xedges, yedges = np.histogram2d(
@@ -72,6 +75,32 @@ if uploaded_file is not None:
             ax2.set_title("Player Heatmap (High Activity Zones)")
 
             st.pyplot(fig2)
+
+            # -------------------------
+            # 🎮 REPLAY FEATURE (NEW)
+            # -------------------------
+            st.subheader("🎮 Movement Replay")
+
+            step = st.slider(
+                "Replay Progress",
+                1,
+                len(position_df),
+                len(position_df) // 2
+            )
+
+            temp_df = position_df.iloc[:step]
+
+            fig3, ax3 = plt.subplots()
+
+            ax3.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
+
+            ax3.plot(temp_df['x'], temp_df['y'], color='blue', alpha=0.6)
+
+            ax3.scatter(temp_df['x'], temp_df['y'], c='red', s=5)
+
+            ax3.set_title("Live Movement Replay")
+
+            st.pyplot(fig3)
 
         else:
             st.write("No position data found.")
