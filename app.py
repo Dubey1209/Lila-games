@@ -1,6 +1,7 @@
 import streamlit as st
 import pyarrow.parquet as pq
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
@@ -26,7 +27,7 @@ if uploaded_file is not None:
         st.dataframe(df.head())
 
         # 🔥 Filter position data
-        position_df = df[df['event'] == 'Position']
+        position_df = df[df['event'] == 'Position'].copy()
 
         st.subheader("Map Visualization (Real Map)")
 
@@ -35,6 +36,16 @@ if uploaded_file is not None:
             # ✅ DEBUG stats
             st.write("📊 Position Data Stats (x, y)")
             st.write(position_df[['x', 'y']].describe())
+
+            # 🔥 SPEED CALCULATION
+            position_df = position_df.sort_index()
+
+            position_df['dx'] = position_df['x'].diff()
+            position_df['dy'] = position_df['y'].diff()
+            position_df['speed'] = np.sqrt(position_df['dx']**2 + position_df['dy']**2)
+
+            st.subheader("⚡ Speed Stats")
+            st.write(position_df['speed'].describe())
 
             # Load map image
             img = mpimg.imread("AmbroseValley_Minimap.png")
@@ -48,21 +59,23 @@ if uploaded_file is not None:
             # Show map aligned
             ax.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
 
-            # 🔥 NEW: movement path (trajectory)
+            # 🔥 movement path
             ax.plot(
                 position_df['x'],
                 position_df['y'],
                 linewidth=1.5,
                 alpha=0.7,
-                color='blue'
+                color='blue',
+                label='Path'
             )
 
-            # Overlay player positions
+            # 🔴 positions
             ax.scatter(
                 position_df['x'],
                 position_df['y'],
                 s=8,
-                c='red'
+                c='red',
+                label='Points'
             )
 
             ax.set_title("Player Movement on Map")
@@ -70,6 +83,8 @@ if uploaded_file is not None:
             # lock axes
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(ymin, ymax)
+
+            ax.legend()
 
             st.pyplot(fig)
 
