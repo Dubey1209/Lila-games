@@ -4,13 +4,21 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+import os
 
 st.set_page_config(page_title="LILA Player Viewer", layout="wide")
 
 st.title("🎮 LILA Player Data Viewer")
-st.write("Upload your `.nakama-0` file below")
 
-uploaded_file = st.file_uploader("Upload file", type=None)
+# -------------------------
+# MAP SELECTION
+# -------------------------
+map_choice = st.selectbox(
+    "Select Map",
+    ["AmbroseValley", "GrandRift", "Lockdown"]
+)
+
+uploaded_file = st.file_uploader("Upload .nakama-0 file")
 
 if uploaded_file is not None:
     try:
@@ -28,14 +36,14 @@ if uploaded_file is not None:
                 lambda x: x.decode('utf-8') if isinstance(x, bytes) else x
             )
 
-        # Filter position data once
+        # Filter position data
         position_df = df[df['event'] == 'Position'].copy()
 
         if position_df.empty:
             st.warning("No position data found.")
             st.stop()
 
-        # Ensure numeric
+        # Clean numeric data
         position_df['x'] = pd.to_numeric(position_df['x'], errors='coerce')
         position_df['y'] = pd.to_numeric(position_df['y'], errors='coerce')
         position_df = position_df.dropna(subset=['x', 'y'])
@@ -44,10 +52,17 @@ if uploaded_file is not None:
         st.dataframe(position_df[['x', 'y']].describe())
 
         # -------------------------
-        # LOAD MAP IMAGE
+        # LOAD MAP IMAGE (DYNAMIC)
         # -------------------------
-        img = mpimg.imread("AmbroseValley_Minimap.png")
+        map_path = f"{map_choice}_Minimap.png"
 
+        if not os.path.exists(map_path):
+            st.error(f"Map image not found: {map_path}")
+            st.stop()
+
+        img = mpimg.imread(map_path)
+
+        # coordinate bounds
         xmin, xmax = position_df['x'].min(), position_df['x'].max()
         ymin, ymax = position_df['y'].min(), position_df['y'].max()
 
@@ -75,16 +90,17 @@ if uploaded_file is not None:
             c='red'
         )
 
-        ax.set_title("Player Movement Path")
+        ax.set_title(f"{map_choice} - Player Path")
+
         st.pyplot(fig)
         plt.close(fig)
 
         # -------------------------
-        # 🔥 HEATMAP (IMPROVED)
+        # 🔥 HEATMAP
         # -------------------------
         st.subheader("🔥 Movement Heatmap")
 
-        heatmap, xedges, yedges = np.histogram2d(
+        heatmap, _, _ = np.histogram2d(
             position_df['x'],
             position_df['y'],
             bins=60
@@ -101,15 +117,21 @@ if uploaded_file is not None:
             aspect='auto'
         )
 
-        ax2.imshow(img, extent=[xmin, xmax, ymin, ymax], alpha=0.25, aspect='auto')
+        # map overlay (important for visual clarity)
+        ax2.imshow(
+            img,
+            extent=[xmin, xmax, ymin, ymax],
+            alpha=0.25,
+            aspect='auto'
+        )
 
-        ax2.set_title("Player Heatmap (Activity Zones)")
+        ax2.set_title(f"{map_choice} - Heatmap")
 
         st.pyplot(fig2)
         plt.close(fig2)
 
         # -------------------------
-        # 🎮 REPLAY FEATURE (SMOOTHER)
+        # 🎮 REPLAY FEATURE
         # -------------------------
         st.subheader("🎮 Movement Replay")
 
@@ -117,7 +139,7 @@ if uploaded_file is not None:
             "Replay Progress",
             min_value=1,
             max_value=len(position_df),
-            value=min(len(position_df), 100)
+            value=min(100, len(position_df))
         )
 
         temp_df = position_df.iloc[:step]
@@ -141,7 +163,7 @@ if uploaded_file is not None:
             s=6
         )
 
-        ax3.set_title(f"Replay Frame: {step}")
+        ax3.set_title(f"{map_choice} - Replay Frame {step}")
 
         st.pyplot(fig3)
         plt.close(fig3)
