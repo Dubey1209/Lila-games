@@ -5,13 +5,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import os
+import time
 
-st.set_page_config(page_title="LILA Player Viewer", layout="wide")
+st.set_page_config(page_title="Game Intelligence Dashboard", layout="wide")
 
-st.title("🎮 LILA Player Data Viewer")
+st.title("🎮 Game Movement Intelligence Dashboard")
 
 # -------------------------
-# MAP SELECTION
+# MAP SELECTOR
 # -------------------------
 map_choice = st.selectbox(
     "Select Map",
@@ -20,7 +21,13 @@ map_choice = st.selectbox(
 
 uploaded_file = st.file_uploader("Upload .nakama-0 file")
 
-if uploaded_file is not None:
+# -------------------------
+# SESSION STATE
+# -------------------------
+if "play" not in st.session_state:
+    st.session_state.play = False
+
+if uploaded_file:
     try:
         # -------------------------
         # LOAD DATA
@@ -28,145 +35,230 @@ if uploaded_file is not None:
         table = pq.read_table(uploaded_file)
         df = table.to_pandas()
 
-        st.success("File loaded successfully!")
-
-        # Decode event column safely
-        if 'event' in df.columns:
-            df['event'] = df['event'].apply(
-                lambda x: x.decode('utf-8') if isinstance(x, bytes) else x
-            )
-
-        # Filter position data
-        position_df = df[df['event'] == 'Position'].copy()
-
-        if position_df.empty:
-            st.warning("No position data found.")
-            st.stop()
-
-        # Clean numeric data
-        position_df['x'] = pd.to_numeric(position_df['x'], errors='coerce')
-        position_df['y'] = pd.to_numeric(position_df['y'], errors='coerce')
-        position_df = position_df.dropna(subset=['x', 'y'])
-
-        st.subheader("📊 Position Stats")
-        st.dataframe(position_df[['x', 'y']].describe())
+        st.success("Data Loaded Successfully")
 
         # -------------------------
-        # LOAD MAP IMAGE (DYNAMIC)
+        # SAFE EVENT CLEANING
+        # -------------------------
+        if "event" in df.columns:
+            df["event"] = df["event"].apply(
+                lambda x: x.decode() if isinstance(x, bytes) else x
+            )
+        else:
+            st.error("Missing 'event' column")
+            st.stop()
+
+        # -------------------------
+        # COORDINATE CHECK
+        # -------------------------
+        if "x" not in df.columns or "y" not in df.columns:
+            st.error("Missing x/y coordinates in dataset")
+            st.stop()
+
+        df["x"] = pd.to_numeric(df["x"], errors="coerce")
+        df["y"] = pd.to_numeric(df["y"], errors="coerce")
+        df = df.dropna(subset=["x", "y"])
+
+        # -------------------------
+        # MATCH FILTER (optional)
+        # -------------------------
+        if "match_id" in df.columns:
+            match_id = st.selectbox("Select Match", df["match_id"].unique())
+            df = df[df["match_id"] == match_id]
+
+        # -------------------------
+        # GLOBAL NORMALIZATION (FIXED)
+        # -------------------------
+        x_min, x_max = df["x"].min(), df["x"].max()
+        y_min, y_max = df["y"].min(), df["y"].max()
+
+        df["x_norm"] = (df["x"] - x_min) / (x_max - x_min if x_max != x_min else 1)
+        df["y_norm"] = (df["y"] - y_min) / (y_max - y_min if y_max != y_min else 1)
+
+        # -------------------------
+        # MAP LOAD
         # -------------------------
         map_path = f"{map_choice}_Minimap.png"
 
         if not os.path.exists(map_path):
-            st.error(f"Map image not found: {map_path}")
+            st.error(f"Map not found: {map_path}")
             st.stop()
 
         img = mpimg.imread(map_path)
 
-        # coordinate bounds
-        xmin, xmax = position_df['x'].min(), position_df['x'].max()
-        ymin, ymax = position_df['y'].min(), position_df['y'].max()
+        # -------------------------
+        # METRICS
+        # -------------------------
+        st.subheader("📊 Movement Intelligence Overview")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Points", len(df))
+        col2.metric("X Range", f"{x_max - x_min:.2f}")
+        col3.metric("Y Range", f"{y_max - y_min:.2f}")
 
         # -------------------------
-        # 🗺️ FULL PATH VIEW
+        # POSITION DATA
         # -------------------------
-        st.subheader("🗺️ Player Path")
+        position_df = df[df["event"] == "Position"].copy()
+        event_df = df[df["event"] != "Position"].copy()
+
+        # -------------------------
+        # PATH VIEW
+        # -------------------------
+        st.subheader("🗺️ Movement Path")
 
         fig, ax = plt.subplots()
+        ax.imshow(img, extent=[0, 1, 0, 1], aspect="auto")
 
-        ax.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
-
-        ax.plot(
-            position_df['x'],
-            position_df['y'],
-            color='blue',
-            linewidth=1,
-            alpha=0.7
-        )
-
-        ax.scatter(
-            position_df['x'],
-            position_df['y'],
-            s=6,
-            c='red'
-        )
-
-        ax.set_title(f"{map_choice} - Player Path")
+        if not position_df.empty:
+            ax.plot(position_df["x_norm"], position_df["y_norm"], linewidth=1)
+            ax.scatter(position_df["x_norm"], position_df["y_norm"], s=4)
 
         st.pyplot(fig)
         plt.close(fig)
 
         # -------------------------
-        # 🔥 HEATMAP
+        # HEATMAP
         # -------------------------
-        st.subheader("🔥 Movement Heatmap")
+        st.subheader("🔥 Hot Zone Detection")
 
-        heatmap, _, _ = np.histogram2d(
-            position_df['x'],
-            position_df['y'],
-            bins=60
-        )
+        if not position_df.empty:
+            heatmap, _, _ = np.histogram2d(
+                position_df["x_norm"],
+                position_df["y_norm"],
+                bins=80
+            )
 
-        fig2, ax2 = plt.subplots()
+            fig2, ax2 = plt.subplots()
 
-        ax2.imshow(
-            heatmap.T,
-            origin='lower',
-            cmap='hot',
-            alpha=0.65,
-            extent=[xmin, xmax, ymin, ymax],
-            aspect='auto'
-        )
+            ax2.imshow(heatmap.T, origin="lower", cmap="hot",
+                       alpha=0.7, extent=[0, 1, 0, 1])
 
-        # map overlay (important for visual clarity)
-        ax2.imshow(
-            img,
-            extent=[xmin, xmax, ymin, ymax],
-            alpha=0.25,
-            aspect='auto'
-        )
+            ax2.imshow(img, extent=[0, 1, 0, 1], alpha=0.25)
 
-        ax2.set_title(f"{map_choice} - Heatmap")
+            st.pyplot(fig2)
+            plt.close(fig2)
 
-        st.pyplot(fig2)
-        plt.close(fig2)
+            # -------------------------
+            # HIGH ACTIVITY ZONES
+            # -------------------------
+            st.subheader("🧠 High Activity Zones")
+
+            threshold = np.percentile(heatmap, 95)
+
+            fig3, ax3 = plt.subplots()
+
+            ax3.imshow(heatmap.T, origin="lower", cmap="hot",
+                       extent=[0, 1, 0, 1], alpha=0.6)
+
+            ax3.contour(heatmap.T, levels=[threshold], colors="cyan")
+
+            ax3.imshow(img, extent=[0, 1, 0, 1], alpha=0.2)
+
+            st.pyplot(fig3)
+            plt.close(fig3)
 
         # -------------------------
-        # 🎮 REPLAY FEATURE
+        # ⚔️ EVENT SYSTEM (SAFE)
         # -------------------------
-        st.subheader("🎮 Movement Replay")
+        st.subheader("⚔️ Game Events Map")
 
-        step = st.slider(
-            "Replay Progress",
-            min_value=1,
-            max_value=len(position_df),
-            value=min(100, len(position_df))
-        )
+        fig4, ax4 = plt.subplots()
+        ax4.imshow(img, extent=[0, 1, 0, 1], alpha=0.8)
 
-        temp_df = position_df.iloc[:step]
+        if not event_df.empty:
+            for e_type, color in {
+                "Kill": "red",
+                "Death": "black",
+                "Loot": "green",
+                "StormDeath": "blue"
+            }.items():
 
-        fig3, ax3 = plt.subplots()
+                temp = event_df[event_df["event"] == e_type]
 
-        ax3.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='auto')
+                if not temp.empty:
+                    ax4.scatter(
+                        temp["x_norm"],
+                        temp["y_norm"],
+                        c=color,
+                        label=e_type,
+                        s=20
+                    )
 
-        ax3.plot(
-            temp_df['x'],
-            temp_df['y'],
-            color='blue',
-            linewidth=1,
-            alpha=0.8
-        )
+        ax4.legend()
+        st.pyplot(fig4)
+        plt.close(fig4)
 
-        ax3.scatter(
-            temp_df['x'],
-            temp_df['y'],
-            c='red',
-            s=6
-        )
+        # -------------------------
+        # 👥 BOT VS HUMAN
+        # -------------------------
+        st.subheader("🤖 Bot vs Human Movement")
 
-        ax3.set_title(f"{map_choice} - Replay Frame {step}")
+        if "player_id" in df.columns:
+            df["is_bot"] = df["player_id"].astype(str).str.contains("bot", case=False)
+        elif "is_bot" not in df.columns:
+            df["is_bot"] = False
 
-        st.pyplot(fig3)
-        plt.close(fig3)
+        bots = df[df["is_bot"] == True]
+        humans = df[df["is_bot"] == False]
+
+        fig5, ax5 = plt.subplots()
+        ax5.imshow(img, extent=[0, 1, 0, 1], alpha=0.8)
+
+        if not humans.empty:
+            ax5.scatter(humans["x_norm"], humans["y_norm"], c="cyan", s=3, label="Human")
+
+        if not bots.empty:
+            ax5.scatter(bots["x_norm"], bots["y_norm"], c="orange", s=3, label="Bot")
+
+        ax5.legend()
+        st.pyplot(fig5)
+        plt.close(fig5)
+
+        # -------------------------
+        # 🎮 REPLAY SYSTEM
+        # -------------------------
+        st.subheader("🎮 Replay System")
+
+        colA, colB = st.columns(2)
+
+        start = colA.button("▶️ Start Replay")
+        stop = colB.button("⏹ Stop Replay")
+
+        if start:
+            st.session_state.play = True
+
+        if stop:
+            st.session_state.play = False
+
+        placeholder = st.empty()
+
+        if st.session_state.play and not position_df.empty:
+            for i in range(10, len(position_df), 10):
+
+                if not st.session_state.play:
+                    break
+
+                fig6, ax6 = plt.subplots()
+                ax6.imshow(img, extent=[0, 1, 0, 1], alpha=0.9)
+
+                ax6.plot(
+                    position_df["x_norm"].iloc[:i],
+                    position_df["y_norm"].iloc[:i],
+                    color="blue"
+                )
+
+                ax6.scatter(
+                    position_df["x_norm"].iloc[i - 1],
+                    position_df["y_norm"].iloc[i - 1],
+                    color="red",
+                    s=30
+                )
+
+                placeholder.pyplot(fig6)
+                plt.close(fig6)
+
+                time.sleep(0.08)
 
     except Exception as e:
         st.error(f"Error: {e}")
